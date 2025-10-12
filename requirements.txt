@@ -2,3 +2,7 @@ discord.py
 py-term
 cryptography
 Pillow
+Flask
+Flask-SocketIO
+aiohttp
+tmdbv3api

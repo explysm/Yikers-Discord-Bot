@@ -4,6 +4,5 @@ venv/
 key.key
 .env.enc
 
-settings.json
-prefixes.json
+servers/settings.json
 

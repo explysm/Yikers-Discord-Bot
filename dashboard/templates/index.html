@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="card bot-header">
+            {% if bot.is_ready() %}
+                <img src="{{ bot.user.display_avatar.url }}" alt="Bot Avatar">
+            {% endif %}
+            <div>
+                <h1>{{ bot.user.name if bot.is_ready() else 'Bot is starting...' }}</h1>
+                <div class="status">
+                    <div id="status-indicator" class="status-indicator status-offline"></div>
+                    <strong id="status-text">Offline</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="card stat-card">
+                <h3>Latency</h3>
+                <p id="latency">- ms</p>
+            </div>
+            <div class="card stat-card">
+                <h3>Servers</h3>
+                <p id="server-count">-</p>
+            </div>
+            <div class="card stat-card">
+                <h3>Users</h3>
+                <p id="user-count">-</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="card-header">Live Channel View</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="server-select">Server</label>
+                    <select id="server-select" required><option value="">Select a server...</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="channel-select">Channel</label>
+                    <select id="channel-select" required disabled><option value="">Select a channel...</option></select>
+                </div>
+            </div>
+
+            <div id="chat-container" class="hidden">
+                <div id="chat-messages"></div>
+                <form id="chat-form">
+                    <input type="file" id="image-upload" hidden accept="image/*">
+                    <button type="button" id="attach-btn" title="Attach Image">📎</button>
+                    <input type="text" id="chat-input" placeholder="Message..." autocomplete="off">
+                    <button type="submit">Send</button>
+                </form>
+                <small id="form-status"></small>
+            </div>
+        </div>
+
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h2 class="card-header" style="margin-bottom: 0;">Console Log</h2>
+                <button id="toggle-log-btn" class="secondary">Show</button>
+            </div>
+            <div id="log-section" class="hidden">
+                <div id="log-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        // --- Element Selectors ---
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const latencyEl = document.getElementById('latency');
+        const serverCountEl = document.getElementById('server-count');
+        const userCountEl = document.getElementById('user-count');
+        const logContainer = document.getElementById('log-container');
+        const logSection = document.getElementById('log-section');
+        const toggleLogBtn = document.getElementById('toggle-log-btn');
+        const serverSelect = document.getElementById('server-select');
+        const channelSelect = document.getElementById('channel-select');
+        const chatContainer = document.getElementById('chat-container');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const attachBtn = document.getElementById('attach-btn');
+        const imageUpload = document.getElementById('image-upload');
+        const formStatus = document.getElementById('form-status');
+        let serverData = [];
+        const botUser = {
+            name: '{{ bot.user.name if bot.is_ready() else "Bot" }}',
+            avatar_url: '{{ bot.user.display_avatar.url if bot.is_ready() else "" }}'
+        };
+
+        // --- Live Stats ---
+        async function fetchStats() {
+            try {
+                const response = await fetch('/api/stats');
+                if (!response.ok) return;
+                const stats = await response.json();
+                statusIndicator.className = `status-indicator status-${stats.status === 'Online' ? 'online' : 'offline'}`;
+                statusText.textContent = stats.status;
+                latencyEl.textContent = `${stats.latency} ms`;
+                serverCountEl.textContent = stats.server_count;
+                userCountEl.textContent = stats.user_count;
+            } catch (error) { statusText.textContent = 'Error'; }
+        }
+
+        // --- Socket.IO Setup ---
+        const socket = io();
+        socket.on('connect', () => {
+            if(logContainer.textContent.trim() === '') logContainer.innerHTML += '[Socket.IO] Connected to backend.\n';
+        });
+        socket.on('log', (data) => {
+            logContainer.innerHTML += data.data.replace(/</g, "&lt;").replace(/>/g, "&gt;") + '\n';
+            logContainer.scrollTop = logContainer.scrollHeight;
+        });
+        socket.on('new_message', (msg) => {
+            renderMessage(msg);
+        });
+
+        // --- Log Toggling ---
+        toggleLogBtn.addEventListener('click', () => {
+            const isHidden = logSection.classList.contains('hidden');
+            logSection.classList.toggle('hidden', !isHidden);
+            toggleLogBtn.textContent = isHidden ? 'Hide' : 'Show';
+        });
+
+        // --- Server/Channel Selection ---
+        async function fetchServers() {
+            try {
+                const response = await fetch('/api/servers');
+                serverData = await response.json();
+                serverSelect.innerHTML = '<option value="">Select a server...</option>';
+                serverData.forEach(server => {
+                    serverSelect.innerHTML += `<option value="${server.id}">${server.name}</option>`;
+                });
+            } catch (error) { console.error("Error fetching servers:", error); }
+        }
+
+        serverSelect.addEventListener('change', () => {
+            const selectedServer = serverData.find(s => s.id === serverSelect.value);
+            channelSelect.innerHTML = '<option value="">Select a channel...</option>';
+            chatContainer.classList.add('hidden');
+            socket.emit('view_channel', { channel_id: null });
+            if (selectedServer) {
+                channelSelect.disabled = false;
+                selectedServer.channels.forEach(channel => {
+                    channelSelect.innerHTML += `<option value="${channel.id}">${channel.name}</option>`;
+                });
+            } else { channelSelect.disabled = true; }
+        });
+
+        // --- Live Chat Logic ---
+        channelSelect.addEventListener('change', async () => {
+            const channelId = channelSelect.value;
+            if (!channelId) {
+                chatContainer.classList.add('hidden');
+                socket.emit('view_channel', { channel_id: null });
+                return;
+            }
+            chatContainer.classList.remove('hidden');
+            socket.emit('view_channel', { channel_id: channelId });
+            await fetchMessages(channelId);
+        });
+
+        function renderMessage(msg) {
+            const msgEl = document.createElement('div');
+            msgEl.classList.add('chat-message');
+            msgEl.innerHTML = `
+                <img src="${msg.avatar_url}" alt="${msg.author}" class="avatar">
+                <div class="message-content">
+                    <div class="message-header">
+                        <span class="author">${msg.author}</span>
+                        <span class="timestamp">${msg.timestamp}</span>
+                    </div>
+                    <div class="content">${msg.content.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+                </div>
+            `;
+            chatMessages.appendChild(msgEl);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        async function fetchMessages(channelId) {
+            chatMessages.innerHTML = '<div class="loading">Loading messages...</div>';
+            try {
+                const response = await fetch(`/api/messages/${channelId}`);
+                const messages = await response.json();
+                chatMessages.innerHTML = '';
+                messages.forEach(renderMessage);
+            } catch (error) {
+                chatMessages.innerHTML = '<div class="loading">Error loading messages.</div>';
+                console.error("Error fetching messages:", error);
+            }
+        }
+
+        attachBtn.addEventListener('click', () => imageUpload.click());
+
+        imageUpload.addEventListener('change', () => {
+            formStatus.textContent = imageUpload.files[0] ? `Selected: ${imageUpload.files[0].name}` : '';
+        });
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const messageToSend = chatInput.value;
+            const imageToSend = imageUpload.files[0];
+
+            if (!messageToSend && !imageToSend) return;
+
+            formStatus.textContent = 'Sending...';
+            
+            const formData = new FormData();
+            formData.append('channel_id', channelSelect.value);
+            formData.append('message', messageToSend);
+            if (imageToSend) {
+                formData.append('image', imageToSend);
+            }
+
+            try {
+                const response = await fetch('/api/send_message', {
+                    method: 'POST', 
+                    body: formData
+                });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    // Optimistically render the text message we just sent
+                    if (messageToSend) {
+                        const optimisticMessage = {
+                            author: botUser.name,
+                            avatar_url: botUser.avatar_url,
+                            content: messageToSend,
+                            timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+                        };
+                        renderMessage(optimisticMessage);
+                    }
+                    
+                    // Clear inputs
+                    chatInput.value = '';
+                    imageUpload.value = '';
+                    formStatus.textContent = '';
+                } else {
+                    formStatus.textContent = `Error: ${result.message}`;
+                    setTimeout(() => formStatus.textContent = '', 4000);
+                }
+            } catch (error) {
+                formStatus.textContent = 'An unexpected error occurred.';
+                setTimeout(() => formStatus.textContent = '', 4000);
+            }
+        });
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchStats();
+            setInterval(fetchStats, 5000);
+            fetchServers();
+        });
+    </script>
+</body>
+</html>
