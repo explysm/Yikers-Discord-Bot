@@ -17,6 +17,7 @@ class ImageCog(commands.Cog, name="Image"):
     @commands.command()
     async def caption(self, ctx, *, text: str):
         """Adds a caption to an image or GIF. Optionally add a number at the end to scale the font (e.g., ..."my caption" 1.5)."""
+        loading_msg = await ctx.send(f"Adding caption... (Latency: {self.bot.latency * 1000:.2f}ms)")
         args = text.split()
         multiplier = 1.0
         caption_text = text
@@ -77,6 +78,7 @@ class ImageCog(commands.Cog, name="Image"):
             if result_bytes:
                 filename = "captioned.gif" if is_animated_image else "captioned.png"
                 file = discord.File(fp=io.BytesIO(result_bytes), filename=filename)
+                await loading_msg.delete()
                 await ctx.send(file=file)
             else:
                 await ctx.send("Could not process the image. It might be an unsupported format.")

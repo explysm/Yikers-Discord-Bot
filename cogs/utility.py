@@ -9,6 +9,8 @@ import re
 from datetime import datetime
 from tmdbv3api import TMDb, Movie
 import html
+import speedtest
+import asyncio
 
 class Utility(commands.Cog):
     """Utility commands for dictionary, lookups, surveys, and more."""
@@ -510,6 +512,33 @@ class Utility(commands.Cog):
             embed.set_footer(text="Powered by The Movie Database (TMDb)")
             await ctx.send(embed=embed)
 
+    @commands.command(name="speedtest")
+    async def speed_test(self, ctx):
+        """Runs a speed test and shows the results."""
+        message = await ctx.send("Running speed test... This may take a moment.")
+        
+        def run_test():
+            s = speedtest.Speedtest()
+            s.get_best_server()
+            s.download()
+            s.upload()
+            return s.results.dict()
+
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(None, run_test)
+
+        ping = results["ping"]
+        download_speed = results["download"] / 1_000_000
+        upload_speed = results["upload"] / 1_000_000
+        server = results["server"]["name"]
+
+        embed = discord.Embed(title="Speed Test Results", color=discord.Color.blue())
+        embed.add_field(name="Ping", value=f"{ping:.2f} ms", inline=True)
+        embed.add_field(name="Download Speed", value=f"{download_speed:.2f} Mbps", inline=True)
+        embed.add_field(name="Upload Speed", value=f"{upload_speed:.2f} Mbps", inline=True)
+        embed.set_footer(text=f"Server: {server}")
+
+        await message.edit(content=None, embed=embed)
 
 async def setup(bot):
     await bot.add_cog(Utility(bot))

@@ -49,6 +49,8 @@ class Profile(commands.Cog):
     @commands.command(name='profile')
     async def profile(self, ctx, user: discord.Member = None):
         """Displays a user's profile card."""
+        loading_msg = await ctx.send(f"Loading profile... (Latency: {self.bot.latency * 1000:.2f}ms)")
+
         user = user or ctx.author
 
         # Load data
@@ -115,6 +117,7 @@ class Profile(commands.Cog):
         # Save and send
         final_card_path = f'{profile_dir}/profile_card.png'
         card.save(final_card_path)
+        await loading_msg.delete()
         await ctx.send(file=discord.File(final_card_path))
 
     @commands.command(name='setbg')
