@@ -4,6 +4,8 @@ from PIL import Image, ImageDraw, ImageFont, ImageSequence
 
 def get_font(size):
     font_paths = [
+        "utils/fonts/OpenSans-Bold.ttf",
+        "utils/fonts/OpenSans-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
